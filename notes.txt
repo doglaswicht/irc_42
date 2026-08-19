@@ -1,0 +1,7 @@
+quand un client se connecte il doit preciser si il veut 
+creer un nouveau compte ou si il veut
+se connecter a un compte qui existe deja
+
+si il veut creer 1 on en creer 1 nouveau
+
+si il veut se reco on devra regarder dans la base des donner si ca existe

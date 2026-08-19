@@ -1,0 +1,5 @@
+![DOUGLAS](img/douglas.jpg)
+![DIA](img/dia.JPG)
+![FEDOR](img/fedor.jpg)
+![JEFF](img/jeff.jpg)
+![JEFF2](img/jeff2.jpg)
