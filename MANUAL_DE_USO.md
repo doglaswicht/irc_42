@@ -702,12 +702,14 @@ Para terminar:
 1. pressione `Ctrl+C` no terminal do `nc`;
 2. pressione `Ctrl+C` no terminal do servidor.
 
-## 17. Próximos comandos planejados
+## 17. Estado final e próximos passos
 
-A ordem atual de desenvolvimento é:
+Todos os comandos obrigatórios e os auxiliares `CAP`, `NAMES`, `WHO` e `NOTICE` estão implementados. O HexChat foi escolhido e validado como cliente de referência.
 
-1. testar com um cliente IRC gráfico/de referência;
-2. implementar comandos auxiliares exigidos pelo cliente escolhido, como `CAP`, `WHO`, `NAMES` ou `NOTICE`;
-3. concluir o README obrigatório em inglês.
+Antes da entrega:
 
-Este manual deve ser atualizado sempre que um desses grupos for concluído.
+1. confirme que o login `dleite-b` aparece na primeira linha do README;
+2. coloque o projeto no repositório Git oficial da 42;
+3. faça commit e push nesse repositório;
+4. clone o repositório em outro diretório e execute `make`;
+5. repita os testes principais com dois clientes HexChat.

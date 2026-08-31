@@ -71,23 +71,12 @@ void Channel::invite(Client *client)
     this->_invited[client->get_name()] = client;
 }
 
-void Channel::kick(std::string name)
-{
-    remove_member(name);
-}
-
-Client* Channel::get_member(std::string name)
-{
-    if (is_member(name)) return this->_members[name];
-    return NULL;
-}
-
 void Channel::broadcast(std::string msg, ClientDataBase &db)
 {
     for (std::map<std::string, Client*>::iterator it = _members.begin(); it != _members.end(); ++it)
     {
         int target_fd = db.get_fd_by_name(it->first);
-        Client *target = db.get_co_client(target_fd);
+        Client *target = db.get_client(target_fd);
         if (target_fd != -1 && target != NULL)
             target->queue_output(msg);
     }
@@ -102,7 +91,7 @@ void Channel::broadcast_except(const std::string &msg,
         if (it->first == excluded)
             continue;
         int target_fd = db.get_fd_by_name(it->first);
-        Client *target = db.get_co_client(target_fd);
+        Client *target = db.get_client(target_fd);
         if (target_fd != -1 && target != NULL)
             target->queue_output(msg);
     }

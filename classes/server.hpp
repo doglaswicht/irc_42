@@ -1,14 +1,18 @@
 #ifndef SERVER_HPP
 #define SERVER_HPP
 
-#include "../head.hpp"
+#include "DataBase.hpp"
+#include "channel.hpp"
+#include <cctype>
+#include <map>
+#include <set>
+#include <string>
 
 class Server
 {
     private:
         ClientDataBase db;
         std::string _password;
-        //map par name comme cle
         std::map<std::string, Channel> _channels;
 
         static std::string channel_key(const std::string &name)
@@ -28,27 +32,17 @@ class Server
             return (_password);
         }
 
-        //renvoie reference sur database
         ClientDataBase &get_db()
         {
             return (this->db);
         }
 
-        //cette fonction va renvoyer
-        //un pointeur sur le channel
-        //si il n existe pas on renvoie NULL
         Channel *get_channel(std::string name)
         {
             const std::string key = channel_key(name);
             if (this->_channels.find(key) != this->_channels.end())
                 return &(this->_channels[key]);
-            return NULL; // Le canal n'existe point
-        }
-
-        //on ajoute une fonction a la map des channels 
-        void add_channel(std::string name, Channel chan)
-        {
-            this->_channels[channel_key(name)] = chan;
+            return (NULL);
         }
 
         bool notify_client_channels(const std::string &nickname,

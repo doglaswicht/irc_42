@@ -1,47 +1,37 @@
-CXX = c++
-CXXFLAGS = -Wall -Wextra -Werror -std=c++98 -pedantic
-#------------------------------------------------------------------
-#DIRECTION - DIRECTION - DIRECTION - DIRECTION - DIRECTION
+NAME := ircserv
 
+CXX := c++
+CXXFLAGS := -Wall -Wextra -Werror -std=c++98 -pedantic
+DEPFLAGS := -MMD -MP
 
-LOGIN_DIR = handle_client_data
+SOURCES := main.cpp \
+	boucle_principale.cpp \
+	create_listening_socket.cpp \
+	handle_client_data/handle_client_data.cpp \
+	classes/Client.cpp \
+	classes/DataBase.cpp \
+	classes/IRCCommand.cpp \
+	classes/channel.cpp
 
-CLASSES_DIR = classes/
-
-#------------------------------------------------------------------
-#FICHIER SOURCE - FICHIER SOURCE - FICHIER SOURCE - FICHIER SOURCE
-
-
-LOGIN_SRC = $(LOGIN_DIR)/handle_client_data.cpp
-
-CLASSES_SRC = $(CLASSES_DIR)/Client.cpp $(CLASSES_DIR)/DataBase.cpp\
-			$(CLASSES_DIR)/Message.cpp $(CLASSES_DIR)/IRCCommand.cpp\
-			$(CLASSES_DIR)/channel.cpp
-#------------------------------------------------------------------
-
-INFILES = 	main.cpp boucle_principale.cpp create_listening_socket.cpp utils.cpp\
-			$(LOGIN_SRC)\
-			$(CLASSES_SRC)
-#------------------------------------------------------------------
-
-OBJFILES = $(INFILES:.cpp=.o)
-
-NAME = ircserv
+OBJECTS := $(SOURCES:.cpp=.o)
+DEPS := $(OBJECTS:.o=.d)
 
 all: $(NAME)
 
-$(NAME):$(OBJFILES)
-	$(CXX) $(CXXFLAGS) $(OBJFILES) -o $(NAME)
+$(NAME): $(OBJECTS)
+	$(CXX) $(CXXFLAGS) $(OBJECTS) -o $@
 
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJFILES)
+	rm -f $(OBJECTS) $(DEPS)
 
 fclean: clean
 	rm -f $(NAME)
 
 re: fclean all
+
+-include $(DEPS)
 
 .PHONY: all clean fclean re

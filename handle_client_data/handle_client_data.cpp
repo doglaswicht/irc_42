@@ -2,7 +2,7 @@
 
 int queue_message(int fd, const std::string &message, ClientDataBase &db)
 {
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
     if (client == NULL)
         return (1);
     client->queue_output(message);
@@ -19,7 +19,7 @@ static std::string numeric_target(Client *client)
 static void send_numeric(int fd, ClientDataBase &db, const std::string &code,
     const std::string &arguments, const std::string &description)
 {
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
     std::string message = ":ircserv " + code + " " + numeric_target(client);
     if (!arguments.empty())
         message += " " + arguments;
@@ -53,15 +53,14 @@ static bool is_valid_nickname(const std::string &nickname)
 static void try_registration(int fd, Server &server)
 {
     ClientDataBase &db = server.get_db();
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
 
     if (client == NULL || client->is_registered() || !client->is_pass_accepted()
         || !client->has_nick() || !client->has_user())
         return;
     client->set_registered(true);
-    db.register_new_client(fd);
-    client = db.get_co_client(fd);
-    client->set_etats(ETAT_DISCUSSION);
+    db.register_client(fd);
+    client = db.get_client(fd);
     queue_message(fd, ":ircserv 001 " + client->get_name()
         + " :Welcome to the IRC network " + client->get_name() + "!"
         + client->get_username() + "@localhost\r\n", db);
@@ -70,7 +69,7 @@ static void try_registration(int fd, Server &server)
 static void handle_pass(int fd, Server &server, const IRCCommand &command)
 {
     ClientDataBase &db = server.get_db();
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
     const std::vector<std::string> &params = command.get_parameters();
 
     if (client->is_registered())
@@ -89,7 +88,7 @@ static void handle_pass(int fd, Server &server, const IRCCommand &command)
 static void handle_nick(int fd, Server &server, const IRCCommand &command)
 {
     ClientDataBase &db = server.get_db();
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
     const std::vector<std::string> &params = command.get_parameters();
 
     if (params.empty() || params[0].empty())
@@ -108,7 +107,7 @@ static void handle_nick(int fd, Server &server, const IRCCommand &command)
             if (!server.notify_client_channels(old_name, event))
                 queue_message(fd, event, db);
             if (db.update_nickname(fd, params[0]) == 0)
-                server.rename_client_in_channels(old_name, params[0], db.get_co_client(fd));
+                server.rename_client_in_channels(old_name, params[0], db.get_client(fd));
         }
         else
         {
@@ -122,7 +121,7 @@ static void handle_nick(int fd, Server &server, const IRCCommand &command)
 static void handle_user(int fd, Server &server, const IRCCommand &command)
 {
     ClientDataBase &db = server.get_db();
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
     const std::vector<std::string> &params = command.get_parameters();
 
     if (client->is_registered() || client->has_user())
@@ -151,7 +150,7 @@ static void handle_ping(int fd, Server &server, const IRCCommand &command)
 static bool handle_quit(int fd, Server &server, const IRCCommand &command)
 {
     ClientDataBase &db = server.get_db();
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
     std::string reason = "Client Quit";
     if (!command.get_parameters().empty() && !command.get_parameters()[0].empty())
         reason = command.get_parameters()[0];
@@ -214,7 +213,7 @@ static void part_one_channel(int fd, Server &server, const std::string &name,
     const std::string &reason)
 {
     ClientDataBase &db = server.get_db();
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
     Channel *channel = server.get_channel(name);
     if (channel == NULL)
         send_numeric(fd, db, "403", name, "No such channel");
@@ -233,7 +232,7 @@ static void part_one_channel(int fd, Server &server, const std::string &name,
 static void handle_join(int fd, Server &server, const IRCCommand &command)
 {
     ClientDataBase &db = server.get_db();
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
     const std::vector<std::string> &params = command.get_parameters();
     if (params.empty())
     {
@@ -312,7 +311,7 @@ static void handle_part(int fd, Server &server, const IRCCommand &command)
 static void handle_privmsg(int fd, Server &server, const IRCCommand &command)
 {
     ClientDataBase &db = server.get_db();
-    Client *sender = db.get_co_client(fd);
+    Client *sender = db.get_client(fd);
     const std::vector<std::string> &params = command.get_parameters();
     if (params.empty() || params[0].empty())
     {
@@ -344,7 +343,7 @@ static void handle_privmsg(int fd, Server &server, const IRCCommand &command)
         else
         {
             int target_fd = db.get_fd_by_name(targets[i]);
-            Client *target = db.get_co_client(target_fd);
+            Client *target = db.get_client(target_fd);
             if (target_fd == -1 || target == NULL || !target->is_registered())
                 send_numeric(fd, db, "401", targets[i], "No such nick/channel");
             else
@@ -375,7 +374,7 @@ static bool require_channel_operator(int fd, ClientDataBase &db,
 static void handle_invite(int fd, Server &server, const IRCCommand &command)
 {
     ClientDataBase &db = server.get_db();
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
     const std::vector<std::string> &params = command.get_parameters();
     if (params.size() < 2)
     {
@@ -391,7 +390,7 @@ static void handle_invite(int fd, Server &server, const IRCCommand &command)
     if (!require_channel_operator(fd, db, channel, client))
         return;
     int target_fd = db.get_fd_by_name(params[0]);
-    Client *target = db.get_co_client(target_fd);
+    Client *target = db.get_client(target_fd);
     if (target_fd == -1 || target == NULL || !target->is_registered())
         send_numeric(fd, db, "401", params[0], "No such nick/channel");
     else if (channel->is_member(target->get_name()))
@@ -410,7 +409,7 @@ static void handle_invite(int fd, Server &server, const IRCCommand &command)
 static void handle_kick(int fd, Server &server, const IRCCommand &command)
 {
     ClientDataBase &db = server.get_db();
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
     const std::vector<std::string> &params = command.get_parameters();
     if (params.size() < 2)
     {
@@ -426,7 +425,7 @@ static void handle_kick(int fd, Server &server, const IRCCommand &command)
     if (!require_channel_operator(fd, db, channel, client))
         return;
     int target_fd = db.get_fd_by_name(params[1]);
-    Client *target = db.get_co_client(target_fd);
+    Client *target = db.get_client(target_fd);
     if (target_fd == -1 || target == NULL
         || !channel->is_member(target->get_name()))
     {
@@ -444,7 +443,7 @@ static void handle_kick(int fd, Server &server, const IRCCommand &command)
 static void handle_topic(int fd, Server &server, const IRCCommand &command)
 {
     ClientDataBase &db = server.get_db();
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
     const std::vector<std::string> &params = command.get_parameters();
     if (params.empty())
     {
@@ -505,7 +504,7 @@ static void broadcast_mode(Client *client, Channel *channel,
 static void handle_mode(int fd, Server &server, const IRCCommand &command)
 {
     ClientDataBase &db = server.get_db();
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
     const std::vector<std::string> &params = command.get_parameters();
     if (params.empty())
     {
@@ -585,7 +584,7 @@ static void handle_mode(int fd, Server &server, const IRCCommand &command)
             }
             std::string nickname = params[argument++];
             int target_fd = db.get_fd_by_name(nickname);
-            Client *target = db.get_co_client(target_fd);
+            Client *target = db.get_client(target_fd);
             if (target_fd == -1 || target == NULL
                 || !channel->is_member(target->get_name()))
             {
@@ -633,10 +632,124 @@ static void handle_mode(int fd, Server &server, const IRCCommand &command)
     }
 }
 
+static void handle_cap(int fd, Server &server, const IRCCommand &command)
+{
+    ClientDataBase &db = server.get_db();
+    Client *client = db.get_client(fd);
+    const std::vector<std::string> &params = command.get_parameters();
+    if (params.empty())
+        return;
+    const std::string target = client->has_nick() ? client->get_name() : "*";
+    if (params[0] == "LS" || params[0] == "LIST")
+        queue_message(fd, ":ircserv CAP " + target + " " + params[0]
+            + " :\r\n", db);
+    else if (params[0] == "REQ")
+    {
+        const std::string requested = params.size() > 1 ? params[1] : "";
+        queue_message(fd, ":ircserv CAP " + target + " NAK :"
+            + requested + "\r\n", db);
+    }
+}
+
+static void send_names(int fd, ClientDataBase &db, Channel *channel)
+{
+    if (channel == NULL)
+        return;
+    send_numeric(fd, db, "353", "= " + channel->get_name(),
+        channel->names_list());
+    send_numeric(fd, db, "366", channel->get_name(), "End of /NAMES list");
+}
+
+static void handle_names(int fd, Server &server, const IRCCommand &command)
+{
+    ClientDataBase &db = server.get_db();
+    const std::vector<std::string> &params = command.get_parameters();
+    if (params.empty())
+    {
+        send_numeric(fd, db, "366", "*", "End of /NAMES list");
+        return;
+    }
+    const std::vector<std::string> names = split_targets(params[0]);
+    for (size_t i = 0; i < names.size(); ++i)
+    {
+        Channel *channel = server.get_channel(names[i]);
+        if (channel != NULL)
+            send_names(fd, db, channel);
+        else
+            send_numeric(fd, db, "366", names[i], "End of /NAMES list");
+    }
+}
+
+static void send_who_member(int fd, ClientDataBase &db, Client *requester,
+    Client *member, Channel *channel)
+{
+    std::string flags = "H";
+    if (channel != NULL && channel->is_admin(member->get_name()))
+        flags += "@";
+    const std::string channel_name = channel != NULL ? channel->get_name() : "*";
+    queue_message(fd, ":ircserv 352 " + requester->get_name() + " "
+        + channel_name + " " + member->get_username()
+        + " localhost ircserv " + member->get_name() + " " + flags
+        + " :0 " + member->get_realname() + "\r\n", db);
+}
+
+static void handle_who(int fd, Server &server, const IRCCommand &command)
+{
+    ClientDataBase &db = server.get_db();
+    Client *requester = db.get_client(fd);
+    const std::vector<std::string> &params = command.get_parameters();
+    const std::string mask = params.empty() ? "*" : params[0];
+    Channel *channel = server.get_channel(mask);
+    if (channel != NULL)
+    {
+        std::set<Client*> members;
+        channel->collect_members(members);
+        for (std::set<Client*>::iterator it = members.begin();
+            it != members.end(); ++it)
+            send_who_member(fd, db, requester, *it, channel);
+    }
+    else
+    {
+        int target_fd = db.get_fd_by_name(mask);
+        Client *target = db.get_client(target_fd);
+        if (target != NULL && target->is_registered())
+            send_who_member(fd, db, requester, target, NULL);
+    }
+    send_numeric(fd, db, "315", mask, "End of /WHO list");
+}
+
+static void handle_notice(int fd, Server &server, const IRCCommand &command)
+{
+    ClientDataBase &db = server.get_db();
+    Client *sender = db.get_client(fd);
+    const std::vector<std::string> &params = command.get_parameters();
+    if (params.size() < 2 || params[0].empty() || params[1].empty())
+        return;
+    const std::vector<std::string> targets = split_targets(params[0]);
+    for (size_t i = 0; i < targets.size(); ++i)
+    {
+        const std::string event = client_prefix(sender) + " NOTICE "
+            + targets[i] + " :" + params[1] + "\r\n";
+        if (targets[i][0] == '#' || targets[i][0] == '&')
+        {
+            Channel *channel = server.get_channel(targets[i]);
+            if (channel != NULL && channel->is_member(sender->get_name()))
+                channel->broadcast_except(event, sender->get_name(), db);
+        }
+        else
+        {
+            int target_fd = db.get_fd_by_name(targets[i]);
+            Client *target = db.get_client(target_fd);
+            if (target != NULL && target->is_registered())
+                queue_message(target_fd, event, db);
+        }
+    }
+}
+
 static bool process_complete_line(int fd, Server &server, const std::string &line)
 {
     ClientDataBase &db = server.get_db();
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
     IRCCommand command;
 
     if (client == NULL || !command.parse(line))
@@ -653,6 +766,8 @@ static bool process_complete_line(int fd, Server &server, const std::string &lin
         return (false);
     else if (command.get_command() == "QUIT")
         return (handle_quit(fd, server, command));
+    else if (command.get_command() == "CAP")
+        handle_cap(fd, server, command);
     else if (!client->is_registered())
         send_numeric(fd, db, "451", command.get_command(), "You have not registered");
     else if (command.get_command() == "JOIN")
@@ -669,6 +784,12 @@ static bool process_complete_line(int fd, Server &server, const std::string &lin
         handle_topic(fd, server, command);
     else if (command.get_command() == "MODE")
         handle_mode(fd, server, command);
+    else if (command.get_command() == "NAMES")
+        handle_names(fd, server, command);
+    else if (command.get_command() == "WHO")
+        handle_who(fd, server, command);
+    else if (command.get_command() == "NOTICE")
+        handle_notice(fd, server, command);
     else
         send_numeric(fd, db, "421", command.get_command(), "Unknown command");
     return (false);
@@ -677,7 +798,7 @@ static bool process_complete_line(int fd, Server &server, const std::string &lin
 int handle_client_data(int fd, Server &server)
 {
     ClientDataBase &db = server.get_db();
-    Client *client = db.get_co_client(fd);
+    Client *client = db.get_client(fd);
     char buffer[BUFFER_SIZE];
 
     if (client == NULL)
@@ -695,7 +816,7 @@ int handle_client_data(int fd, Server &server)
             server.notify_client_channels(nickname, event);
             server.remove_client_from_channels(nickname);
         }
-        db.move_co_client_to_deco(fd);
+        db.remove_client(fd);
         close(fd);
         return (1);
     }
@@ -703,7 +824,7 @@ int handle_client_data(int fd, Server &server)
     if (client->get_input_buffer().size() > 8192)
     {
         std::cerr << "Error: input buffer limit exceeded for client " << fd << std::endl;
-        db.move_co_client_to_deco(fd);
+        db.remove_client(fd);
         close(fd);
         return (1);
     }
@@ -712,7 +833,7 @@ int handle_client_data(int fd, Server &server)
     {
         if (process_complete_line(fd, server, line))
             break;
-        client = db.get_co_client(fd);
+        client = db.get_client(fd);
     }
     return (0);
 }
