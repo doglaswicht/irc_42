@@ -1,715 +1,417 @@
-# Manual de inicialização e uso do `ft_irc`
+# Manuel d'utilisation de `ft_irc`
 
-## 1. Estado atual do projeto
+Ce manuel explique comment compiler, lancer et tester le serveur.
 
-O servidor já pode ser compilado, iniciado e receber conexões TCP de vários clientes. O registro IRC com `PASS`, `NICK` e `USER` está implementado.
+## 1. Compiler
 
-Neste momento, os seguintes comandos funcionam:
-
-- `PASS` — envia a senha do servidor;
-- `NICK` — escolhe o nickname inicial;
-- `USER` — envia username e nome real.
-- `PING` — verifica a conexão e recebe `PONG`;
-- `PONG` — confirma uma verificação enviada pelo servidor;
-- `NICK` — também altera o nickname depois do registro;
-- `QUIT` — encerra a conexão com motivo opcional.
-- `JOIN` — entra em um ou vários canais;
-- `PART` — sai de um ou vários canais;
-- `PRIVMSG` — envia mensagens privadas ou para canais.
-
-Os comandos obrigatórios `KICK`, `INVITE`, `TOPIC` e `MODE` também estão implementados. A sintaxe antiga com `send`, `create` e `enter` não faz mais parte do fluxo atual.
-
-Um cliente pode estar associado a vários canais simultaneamente.
-
-## 2. Abrir o diretório do projeto
-
-No terminal, entre na pasta que contém o Makefile:
-
-```bash
-cd IA_IRC/AI_IRC
-```
-
-Para confirmar que está no diretório correto:
-
-```bash
-pwd
-ls
-```
-
-Entre os arquivos mostrados devem estar `Makefile`, `main.cpp` e `boucle_principale.cpp`.
-
-## 3. Compilar o servidor
-
-Execute:
+Depuis le dossier qui contient le `Makefile`, lancer :
 
 ```bash
 make
 ```
 
-Se a compilação terminar corretamente, será criado o executável:
+Si tout se passe bien, un exécutable est créé :
 
 ```text
 ircserv
 ```
 
-Para apagar somente os arquivos objeto (`.o`):
+Autres commandes utiles :
 
 ```bash
 make clean
-```
-
-Para apagar os objetos e o executável:
-
-```bash
 make fclean
-```
-
-Para apagar e recompilar tudo:
-
-```bash
 make re
 ```
 
-## 4. Iniciar o servidor
+## 2. Lancer le serveur
 
-A sintaxe é:
-
-```bash
-./ircserv <porta> <senha>
-```
-
-Exemplo:
+Syntaxe :
 
 ```bash
-./ircserv 6667 secret
+./ircserv <port> <mot_de_passe>
 ```
 
-Nesse exemplo:
-
-- `6667` é a porta TCP;
-- `secret` é a senha que cada cliente deve enviar com `PASS`.
-
-O terminal ficará ocupado enquanto o servidor estiver funcionando. Isso é normal: o processo está aguardando conexões e mensagens.
-
-### Escolha da porta
-
-A porta deve ser um número entre `1` e `65535`. Para testes, é recomendável usar uma porta alta, como:
+Exemple :
 
 ```bash
 ./ircserv 6667 secret
-./ircserv 6668 secret
-./ircserv 8080 secret
 ```
 
-Se a porta já estiver ocupada, escolha outra.
+Ici :
 
-## 5. Parar o servidor
+- `6667` est le port TCP ;
+- `secret` est le mot de passe du serveur.
 
-No terminal onde o servidor está executando, pressione:
+Le terminal reste occupé tant que le serveur tourne.
+
+Pour arrêter le serveur :
 
 ```text
 Ctrl+C
 ```
 
-O atalho envia `SIGINT`; o servidor encerra o loop e fecha os sockets.
+## 3. Se connecter avec `nc`
 
-Também é possível enviar `SIGTERM` a partir de outro terminal:
-
-```bash
-pkill -TERM ircserv
-```
-
-Use `pkill` somente quando tiver certeza de que deseja parar todos os processos chamados `ircserv` pertencentes ao seu usuário.
-
-## 6. Conectar um cliente com `nc`
-
-Mantenha o servidor aberto no primeiro terminal. Abra um segundo terminal e execute:
+Dans un autre terminal :
 
 ```bash
 nc 127.0.0.1 6667
 ```
 
-Significado dos argumentos:
+Le port doit être le même que celui utilisé au lancement du serveur.
 
-- `127.0.0.1` significa que o cliente e o servidor estão no mesmo computador;
-- `6667` deve ser a mesma porta usada para iniciar o servidor.
+## 4. S'enregistrer
 
-Se o comando `nc` não existir, verifique se o Netcat está instalado no sistema. Em algumas versões, o programa pode se chamar `netcat`.
-
-## 7. Registrar-se no servidor
-
-Depois de conectar com `nc`, envie estas três linhas, pressionando Enter ao final de cada uma:
+Après la connexion avec `nc`, envoyer :
 
 ```text
 PASS secret
 NICK alice
-USER alice 0 * :Alice Doe
+USER alice 0 * :Alice
 ```
 
-Troque `secret` pela senha usada ao iniciar o servidor.
+Si le mot de passe est correct, le serveur répond avec un message `001`.
 
-### Explicação de cada linha
-
-```text
-PASS secret
-```
-
-Envia a senha global do servidor.
-
-```text
-NICK alice
-```
-
-Define `alice` como nickname. O nickname deve:
-
-- ter no máximo 30 caracteres;
-- começar com uma letra ou caractere especial autorizado;
-- não conter espaços;
-- não estar sendo usado por outro cliente conectado.
-
-```text
-USER alice 0 * :Alice Doe
-```
-
-Define:
-
-- `alice` como username;
-- `0` e `*` como parâmetros tradicionais do comando IRC;
-- `Alice Doe` como nome real, depois de `:`.
-
-Quando tudo estiver correto, o servidor responde aproximadamente:
+Exemple :
 
 ```text
 :ircserv 001 alice :Welcome to the IRC network alice!alice@localhost
 ```
 
-O código `001` confirma que o registro foi concluído.
+`001` signifie que le client est enregistré.
 
-## 8. Ordem dos comandos de registro
+## 5. Connecter deux clients
 
-Os comandos podem chegar em ordens diferentes. Por exemplo, isto também funciona:
-
-```text
-NICK alice
-USER alice 0 * :Alice Doe
-PASS secret
-```
-
-O servidor espera até possuir senha válida, nickname e dados de usuário antes de enviar `001`.
-
-Por clareza e compatibilidade com clientes IRC, recomenda-se usar a ordem:
-
-```text
-PASS
-NICK
-USER
-```
-
-## 9. Conectar dois clientes
-
-Primeiro terminal — servidor:
+Terminal 1 :
 
 ```bash
 ./ircserv 6667 secret
 ```
 
-Segundo terminal — primeiro cliente:
+Terminal 2 :
 
 ```bash
 nc 127.0.0.1 6667
 ```
 
-Registro do primeiro cliente:
+Puis :
 
 ```text
 PASS secret
 NICK alice
-USER alice 0 * :Alice Doe
+USER alice 0 * :Alice
 ```
 
-Terceiro terminal — segundo cliente:
+Terminal 3 :
 
 ```bash
 nc 127.0.0.1 6667
 ```
 
-Registro do segundo cliente:
+Puis :
 
 ```text
 PASS secret
 NICK bob
-USER bob 0 * :Bob Smith
+USER bob 0 * :Bob
 ```
 
-Os dois clientes ficam conectados simultaneamente e já podem conversar usando `PRIVMSG`.
+Les deux clients sont maintenant connectés.
 
-### Entrar em canais
+## 6. Rejoindre un canal
 
-Em cada cliente:
+Dans les deux clients :
 
 ```text
-JOIN #geral
+JOIN #general
 ```
 
-Para entrar em vários canais de uma vez:
+Le premier client qui rejoint un canal devient opérateur du canal. Dans la liste
+des noms, il apparaît avec `@`.
+
+Exemple :
 
 ```text
-JOIN #geral,#programacao,#testes
+:ircserv 353 alice = #general :@alice bob
 ```
 
-O primeiro cliente de um canal recebe privilégio de operador, indicado por `@` na resposta `353`.
+## 7. Envoyer un message dans un canal
 
-### Enviar mensagem privada
-
-Alice envia para Bob:
+Depuis `alice` :
 
 ```text
-PRIVMSG bob :Olá Bob!
+PRIVMSG #general :salut bob
 ```
 
-Bob recebe:
+`bob` doit recevoir :
 
 ```text
-:alice!alice@localhost PRIVMSG bob :Olá Bob!
+:alice!alice@localhost PRIVMSG #general :salut bob
 ```
 
-### Enviar mensagem para um canal
+Le serveur envoie le message aux autres membres du canal.
+
+## 8. Envoyer un message privé
+
+Depuis `bob` :
 
 ```text
-PRIVMSG #geral :Olá a todos!
+PRIVMSG alice :salut alice
 ```
 
-A mensagem é entregue aos outros membros do canal, mas não retorna ao remetente.
-
-### Sair de um canal
+`alice` doit recevoir :
 
 ```text
-PART #geral :Até logo
+:bob!bob@localhost PRIVMSG alice :salut alice
 ```
 
-Para sair de vários canais:
+## 9. Quitter
+
+Pour quitter proprement :
 
 ```text
-PART #geral,#programacao :Até logo
+QUIT :bye
 ```
 
-Para sair de todos os canais:
+Le serveur ferme ensuite la connexion du client.
+
+## 10. Commandes disponibles
+
+Commandes principales :
+
+| Commande | Utilisation |
+|---|---|
+| `PASS` | envoyer le mot de passe |
+| `NICK` | choisir ou changer de nickname |
+| `USER` | envoyer les informations utilisateur |
+| `PING` | tester la connexion |
+| `QUIT` | quitter le serveur |
+| `JOIN` | entrer dans un canal |
+| `PART` | quitter un canal |
+| `PRIVMSG` | envoyer un message |
+
+Commandes de canal obligatoires :
+
+| Commande | Utilisation |
+|---|---|
+| `KICK` | retirer un membre du canal |
+| `INVITE` | inviter un utilisateur |
+| `TOPIC` | lire ou modifier le sujet du canal |
+| `MODE` | modifier les modes du canal |
+
+Commandes de compatibilité :
+
+| Commande | Utilisation |
+|---|---|
+| `CAP` | négociation avec certains clients IRC |
+| `NAMES` | liste des membres d'un canal |
+| `WHO` | informations sur les membres |
+| `NOTICE` | message sans réponse d'erreur |
+
+## 11. Exemples de commandes opérateur
+
+Créer un canal :
 
 ```text
-JOIN 0
+JOIN #test
 ```
 
-### Consultar e alterar o tópico
+Le premier utilisateur devient opérateur.
 
-Consultar:
+Activer le mode invitation seulement :
 
 ```text
-TOPIC #geral
+MODE #test +i
 ```
 
-Alterar ou limpar:
+Désactiver le mode invitation seulement :
 
 ```text
-TOPIC #geral :Novo tópico
-TOPIC #geral :
+MODE #test -i
 ```
 
-Com o modo `+t`, somente operadores podem alterar o tópico.
-
-### Convidar um usuário
-
-Somente um operador pode executar:
+Inviter un utilisateur :
 
 ```text
-INVITE bob #geral
+INVITE bob #test
 ```
 
-O convite permite que Bob entre quando o canal estiver em modo `+i`:
+Définir une clé de canal :
 
 ```text
-JOIN #geral
+MODE #test +k secretkey
 ```
 
-### Expulsar um usuário
+Rejoindre un canal avec clé :
 
 ```text
-KICK #geral bob :Motivo da expulsão
+JOIN #test secretkey
 ```
 
-Somente operadores do canal podem usar `KICK`.
-
-### Consultar modos
+Retirer la clé :
 
 ```text
-MODE #geral
+MODE #test -k
 ```
 
-### Modos disponíveis
-
-Canal somente por convite:
+Limiter le nombre d'utilisateurs :
 
 ```text
-MODE #geral +i
-MODE #geral -i
+MODE #test +l 3
 ```
 
-Tópico restrito a operadores:
+Retirer la limite :
 
 ```text
-MODE #geral +t
-MODE #geral -t
+MODE #test -l
 ```
 
-Definir ou remover senha do canal:
+Donner les droits opérateur :
 
 ```text
-MODE #geral +k senhaCanal
-MODE #geral -k
+MODE #test +o bob
 ```
 
-Para entrar em um canal protegido:
+Retirer les droits opérateur :
 
 ```text
-JOIN #geral senhaCanal
+MODE #test -o bob
 ```
 
-Promover ou remover operador:
+Protéger le topic :
 
 ```text
-MODE #geral +o bob
-MODE #geral -o bob
+MODE #test +t
 ```
 
-Definir ou remover limite de usuários:
+Changer le topic :
 
 ```text
-MODE #geral +l 10
-MODE #geral -l
+TOPIC #test :Sujet du canal
 ```
 
-Modos podem ser combinados quando os parâmetros aparecem na mesma ordem:
+Expulser un utilisateur :
 
 ```text
-MODE #geral +it
-MODE #geral +kl senhaCanal 10
+KICK #test bob :raison
 ```
 
-## 10. Atalhos de teclado úteis
+## 12. Tester une commande partielle
 
-### No terminal do servidor
+Avec `nc`, il est possible d'envoyer une commande en plusieurs morceaux.
 
-- `Ctrl+C` — para o servidor de forma controlada.
-
-### No `nc`
-
-- `Enter` — termina e envia uma linha;
-- `Ctrl+D` — envia o conteúdo pendente/indica fim da entrada, dependendo da versão do Netcat e do estado da linha;
-- `Ctrl+C` — encerra o cliente `nc` imediatamente;
-- `Ctrl+L` — limpa visualmente o terminal sem apagar o histórico da sessão.
-
-No exemplo de fragmentação do enunciado, `Ctrl+D` pode ser usado para enviar partes de uma linha antes do Enter. O servidor mantém os fragmentos no buffer até receber `\n`.
-
-## 11. Testar comandos fragmentados
-
-Conecte-se com `nc` e escreva parte de um comando sem pressionar Enter:
+Exemple :
 
 ```text
-PA
+PASS sec
 ```
 
-Pressione `Ctrl+D` uma vez para tentar enviar esse fragmento. Em seguida, digite:
+Puis finir ensuite :
 
 ```text
-SS secret
+ret
 ```
 
-Pressione Enter. O servidor deve reconstruir:
+Le serveur doit attendre la fin de la ligne avant de traiter la commande.
+
+Autre exemple :
+
+```text
+PRIV
+```
+
+Puis :
+
+```text
+MSG #general :message coupe
+```
+
+Le serveur doit reconstruire :
+
+```text
+PRIVMSG #general :message coupe
+```
+
+## 13. Tester avec un client IRC
+
+On peut aussi utiliser un vrai client IRC, par exemple HexChat, WeeChat ou irssi.
+
+Paramètres :
+
+```text
+serveur: 127.0.0.1
+port: 6667
+mot de passe: secret
+nickname: alice
+username: alice
+```
+
+Si le client demande des capacités avec `CAP`, le serveur répond de façon simple
+pour permettre la connexion.
+
+## 14. Tester Valgrind
+
+Commande :
+
+```bash
+valgrind --leak-check=full --track-fds=yes ./ircserv 6667 secret
+```
+
+Dans un autre terminal, connecter quelques clients, faire des `JOIN`,
+`PRIVMSG`, puis quitter.
+
+À la fin, arrêter le serveur avec `Ctrl+C`.
+
+Résultat attendu :
+
+```text
+All heap blocks were freed -- no leaks are possible
+ERROR SUMMARY: 0 errors
+```
+
+## 15. Séquence rapide pour la défense
+
+Dans le serveur :
+
+```bash
+make re
+./ircserv 6667 secret
+```
+
+Client 1 :
 
 ```text
 PASS secret
+NICK alice
+USER alice 0 * :Alice
+JOIN #test
 ```
 
-O comportamento exato de `Ctrl+D` pode variar entre implementações do Netcat. O teste automatizado com `printf` é mais previsível.
-
-## 12. Enviar vários comandos de uma vez
-
-É possível enviar todo o registro em uma única chamada:
-
-```bash
-printf 'PASS secret\r\nNICK alice\r\nUSER alice 0 * :Alice Doe\r\n' | nc -w 1 127.0.0.1 6667
-```
-
-O servidor separa todas as linhas completas e processa cada comando na ordem recebida.
-
-## 13. Manter e encerrar a conexão
-
-### Testar com `PING`
-
-Depois de conectar, envie um identificador qualquer:
+Client 2 :
 
 ```text
-PING 12345
-```
-
-Resposta esperada:
-
-```text
-:ircserv PONG ircserv :12345
-```
-
-Se `PING` for enviado sem parâmetro, o servidor responde com o erro `409`.
-
-### Enviar `PONG`
-
-Um cliente pode responder a uma verificação do servidor com:
-
-```text
-PONG 12345
-```
-
-O servidor aceita `PONG` silenciosamente.
-
-### Alterar o nickname
-
-Depois de receber `001`, escolha um novo nickname:
-
-```text
+PASS secret
 NICK bob
+USER bob 0 * :Bob
+JOIN #test
+PRIVMSG #test :bonjour
 ```
 
-O cliente e os membros dos canais associados recebem um evento semelhante a:
+Client 1 :
 
 ```text
-:alice!alice@localhost NICK :bob
+MODE #test +o bob
+TOPIC #test :demo
+KICK #test bob :test
 ```
 
-As mesmas regras de sintaxe e unicidade do registro inicial continuam válidas.
-
-### Sair com `QUIT`
-
-Para encerrar informando um motivo:
-
-```text
-QUIT :Até logo
-```
-
-Sem motivo explícito:
-
-```text
-QUIT
-```
-
-O servidor entrega as respostas já pendentes, envia uma linha `ERROR`, remove o cliente dos canais, libera o nickname e fecha a conexão.
-
-## 14. Respostas de erro
-
-As respostas IRC começam com `:ircserv`, seguidas por um código numérico.
-
-### Senha incorreta — `464`
-
-Entrada:
-
-```text
-PASS wrong
-```
-
-Resposta:
-
-```text
-:ircserv 464 * :Password incorrect
-```
-
-É possível tentar `PASS` novamente com a senha correta.
-
-### Nickname ausente — `431`
-
-Entrada:
-
-```text
-NICK
-```
-
-Resposta esperada:
-
-```text
-:ircserv 431 * :No nickname given
-```
-
-### Nickname inválido — `432`
-
-Entrada:
-
-```text
-NICK 123alice
-```
-
-Resposta:
-
-```text
-:ircserv 432 * 123alice :Erroneous nickname
-```
-
-### Nickname em uso — `433`
-
-Se outro cliente conectado já estiver usando `alice`:
-
-```text
-NICK alice
-```
-
-Resposta:
-
-```text
-:ircserv 433 * alice :Nickname is already in use
-```
-
-### Parâmetros insuficientes — `461`
-
-Exemplo:
-
-```text
-USER alice
-```
-
-Resposta:
-
-```text
-:ircserv 461 * USER :Not enough parameters
-```
-
-### Cliente ainda não registrado — `451`
-
-Se um comando diferente de `PASS`, `NICK` ou `USER` for enviado antes da conclusão do registro:
-
-```text
-PRIVMSG bob :hello
-```
-
-Resposta:
-
-```text
-:ircserv 451 * PRIVMSG :You have not registered
-```
-
-### Comando desconhecido — `421`
-
-Depois do registro:
-
-```text
-QUALQUERCOISA
-```
-
-Resposta:
-
-```text
-:ircserv 421 alice QUALQUERCOISA :Unknown command
-```
-
-### Tentativa de registrar novamente — `462`
-
-Depois de receber `001`, tentar executar `PASS` ou `USER` novamente resulta em `462`.
-
-## 15. Problemas comuns
-
-### `Usage: ./ircserv <port> <password>`
-
-O programa foi iniciado sem os dois argumentos obrigatórios. Use:
-
-```bash
-./ircserv 6667 secret
-```
-
-### `Error: port must be a number between 1 and 65535`
-
-A porta está vazia, contém letras ou está fora da faixa permitida.
-
-Incorreto:
-
-```bash
-./ircserv abc secret
-./ircserv 70000 secret
-```
-
-Correto:
-
-```bash
-./ircserv 6667 secret
-```
-
-### `Error: password must not be empty`
-
-A senha não pode ser uma string vazia.
-
-### `Error: could not bind to port`
-
-Normalmente significa que a porta já está em uso ou não está disponível. Pare o servidor anterior com `Ctrl+C` ou escolha outra porta:
-
-```bash
-./ircserv 6668 secret
-```
-
-### O `nc` fecha imediatamente
-
-Verifique:
-
-- se o servidor continua executando;
-- se o endereço é `127.0.0.1`;
-- se a porta é a mesma nos dois terminais;
-- se outro programa não está ocupando a porta.
-
-### Nenhuma resposta aparece depois de `PASS`
-
-Isso pode ser normal. O servidor envia `001` somente depois de receber os três comandos válidos:
-
-```text
-PASS secret
-NICK alice
-USER alice 0 * :Alice Doe
-```
-
-## 16. Teste rápido completo
-
-Terminal 1:
-
-```bash
-cd IA_IRC/AI_IRC
-make
-./ircserv 6667 secret
-```
-
-Terminal 2:
-
-```bash
-nc 127.0.0.1 6667
-```
-
-Digite no terminal 2:
-
-```text
-PASS secret
-NICK alice
-USER alice 0 * :Alice Doe
-```
-
-Resultado esperado:
-
-```text
-:ircserv 001 alice :Welcome to the IRC network alice!alice@localhost
-```
-
-Para terminar:
-
-1. pressione `Ctrl+C` no terminal do `nc`;
-2. pressione `Ctrl+C` no terminal do servidor.
-
-## 17. Estado final e próximos passos
-
-Todos os comandos obrigatórios e os auxiliares `CAP`, `NAMES`, `WHO` e `NOTICE` estão implementados. O HexChat foi escolhido e validado como cliente de referência.
-
-Antes da entrega:
-
-1. confirme que o login `dleite-b` aparece na primeira linha do README;
-2. coloque o projeto no repositório Git oficial da 42;
-3. faça commit e push nesse repositório;
-4. clone o repositório em outro diretório e execute `make`;
-5. repita os testes principais com dois clientes HexChat.
+Cette séquence montre :
+
+- l'enregistrement ;
+- plusieurs clients ;
+- un canal ;
+- un message de canal ;
+- les droits opérateur ;
+- `TOPIC` ;
+- `KICK`.

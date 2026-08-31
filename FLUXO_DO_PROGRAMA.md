@@ -1,588 +1,308 @@
-# Fluxo de funcionamento do `ft_irc`
+# Fonctionnement du programme `ft_irc`
 
-## 1. Visão geral
+Ce document explique le serveur avec des mots simples. Le but est de pouvoir
+suivre le chemin d'une connexion, depuis le lancement du programme jusqu'au
+traitement des commandes IRC.
 
-O programa é um servidor IRC TCP não bloqueante escrito em C++98. Um único loop baseado em `poll()` controla:
+## 1. Idée générale
 
-- o socket que aceita novas conexões;
-- a leitura dos clientes com `POLLIN`;
-- a escrita das respostas com `POLLOUT`;
-- erros, encerramentos e desconexões.
+Le programme est un serveur IRC écrit en C++98.
 
-Fluxo resumido:
+Il utilise :
 
-```mermaid
-flowchart TD
-    A[main] --> B[Validar argumentos]
-    B --> C[Criar socket de escuta]
-    C --> D[Configurar socket não bloqueante]
-    D --> E[bind e listen]
-    E --> F[Loop principal com poll]
-    F --> G{Tipo de evento}
-    G -->|Socket servidor + POLLIN| H[accept novo cliente]
-    G -->|Cliente + POLLIN| I[recv e acumular entrada]
-    G -->|Cliente + POLLOUT| J[send da fila de saída]
-    G -->|Erro ou desconexão| K[Limpar cliente e canais]
-    H --> F
-    I --> L[Extrair linhas completas]
-    L --> M[Parser IRC]
-    M --> N[Executar comando]
-    N --> O[Enfileirar respostas]
-    O --> F
-    J --> F
-    K --> F
-```
+- un socket TCP pour recevoir les connexions ;
+- des sockets non bloquants pour les clients ;
+- un seul appel à `poll()` dans la boucle principale ;
+- un buffer d'entrée pour chaque client ;
+- une file de sortie pour chaque client.
 
-## 2. Entrada do programa
+Le serveur ne bloque pas sur un client. Si un client ne parle pas, ou s'il ne
+lit pas ses réponses, les autres clients continuent à fonctionner.
 
-O ponto de entrada está em `main.cpp`.
+## 2. Lancement
 
-Execução esperada:
+Le serveur se lance avec deux arguments :
 
 ```bash
-./ircserv <porta> <senha>
+./ircserv <port> <mot_de_passe>
 ```
 
-Exemplo:
+Exemple :
 
 ```bash
 ./ircserv 6667 secret
 ```
 
-O `main()` executa esta sequência:
+Dans `main.cpp`, le programme :
 
-1. confirma que foram recebidos exatamente dois argumentos;
-2. rejeita senha vazia;
-3. configura `SIGPIPE` para não encerrar o servidor durante uma escrita;
-4. configura `SIGINT` e `SIGTERM` para encerramento controlado;
-5. chama `create_listening_socket()`;
-6. inicia `boucle_principale()` com o socket e a senha;
-7. fecha o socket de escuta quando o loop termina;
-8. devolve o status final ao sistema operacional.
+1. vérifie le nombre d'arguments ;
+2. refuse un mot de passe vide ;
+3. ignore `SIGPIPE` pour éviter un arrêt brutal pendant un `send()` ;
+4. prépare `SIGINT` et `SIGTERM` pour arrêter le serveur proprement ;
+5. crée le socket d'écoute ;
+6. lance la boucle principale ;
+7. ferme le socket d'écoute à la fin.
 
-## 3. Criação do socket de escuta
+## 3. Création du socket serveur
 
-A função `create_listening_socket()` está em `create_listening_socket.cpp`.
+La fonction `create_listening_socket()` fait le travail réseau initial.
 
-Fluxo:
+Elle :
 
-```mermaid
-flowchart TD
-    A[Receber porta como texto] --> B{Porta entre 1 e 65535?}
-    B -->|Não| X[Mostrar erro e retornar -1]
-    B -->|Sim| C[socket AF_INET SOCK_STREAM]
-    C --> D[setsockopt SO_REUSEADDR]
-    D --> E[Preencher sockaddr_in]
-    E --> F[bind]
-    F --> G[fcntl O_NONBLOCK]
-    G --> H[listen]
-    H --> I[Retornar descritor]
+1. vérifie que le port est un nombre entre `1` et `65535` ;
+2. crée un socket TCP IPv4 avec `socket(AF_INET, SOCK_STREAM, 0)` ;
+3. active `SO_REUSEADDR` ;
+4. écoute sur toutes les interfaces avec `INADDR_ANY` ;
+5. fait le `bind()` ;
+6. met le socket en non bloquant avec :
+
+```cpp
+fcntl(fd, F_SETFL, O_NONBLOCK);
 ```
 
-Propriedades importantes:
+7. lance `listen()`.
 
-- comunicação TCP/IPv4;
-- aceita conexões por todas as interfaces com `INADDR_ANY`;
-- permite reutilizar o endereço com `SO_REUSEADDR`;
-- socket configurado como não bloqueante;
-- cada falha fecha o socket antes de retornar.
+Si une étape échoue, le socket est fermé et le programme retourne une erreur.
 
-## 4. Objeto `Server`
+## 4. Boucle principale
 
-O loop cria uma única instância de `Server`.
+La boucle principale est dans `boucle_principale.cpp`.
 
-Ela contém:
+Elle contient un vecteur de `pollfd` :
 
 ```text
-Server
-├── senha global
-├── ClientDataBase
-└── mapa de Channel
+fds[0] = socket serveur
+fds[1] = client 1
+fds[2] = client 2
+...
 ```
 
-Responsabilidades principais:
+Le socket serveur attend `POLLIN`, car il sert à accepter de nouveaux clients.
 
-- disponibilizar a senha usada por `PASS`;
-- encontrar, criar e remover canais;
-- adicionar e remover clientes dos canais;
-- atualizar associações após mudança de nickname;
-- notificar membros que compartilham canais;
-- remover canais quando ficam vazios.
+Chaque client attend :
 
-## 5. Loop principal com `poll()`
+- `POLLIN` quand on peut lire des données ;
+- `POLLOUT` seulement quand il y a une réponse à envoyer.
 
-O loop está em `boucle_principale.cpp`.
+Le serveur utilise un seul appel à `poll()` :
 
-O vetor de `pollfd` começa contendo somente o socket de escuta:
-
-```text
-fds[0] = socket do servidor, eventos = POLLIN
+```cpp
+poll(&fds[0], fds.size(), -1)
 ```
 
-Cada cliente aceito adiciona outro elemento:
+Ensuite, il regarde les événements reçus.
 
-```text
-fds[n] = socket do cliente, eventos = POLLIN ou POLLIN | POLLOUT
-```
+## 5. Événements gérés
 
-O servidor usa apenas uma chamada a `poll()` para controlar todos os descritores.
-
-### Eventos tratados
-
-| Evento | Ação |
+| Événement | Action |
 |---|---|
-| `POLLIN` no servidor | Executa `accept()` |
-| `POLLIN` no cliente | Executa `recv()` |
-| `POLLOUT` no cliente | Envia parte da fila com `send()` |
-| `POLLERR` | Remove a conexão com erro |
-| `POLLHUP` | Remove uma conexão encerrada |
-| `POLLNVAL` | Remove um descritor inválido |
+| `POLLIN` sur le socket serveur | accepter un nouveau client avec `accept()` |
+| `POLLIN` sur un client | lire avec `recv()` |
+| `POLLOUT` sur un client | envoyer une partie de la file avec `send()` |
+| `POLLERR` | déconnecter le client |
+| `POLLNVAL` | retirer le descripteur invalide |
+| `POLLHUP` | gérer une fermeture de connexion |
 
-## 6. Aceitação de um cliente
+`accept()`, `recv()` et `send()` sont donc appelés seulement après `poll()`.
 
-Quando `poll()` indica `POLLIN` no socket de escuta:
+## 6. Arrivée d'un client
 
-1. o servidor chama `accept()`;
-2. configura o novo socket com `O_NONBLOCK`;
-3. adiciona o descritor ao vetor de `pollfd`;
-4. cria um `Client` pendente no `ClientDataBase`;
-5. começa a monitorar o cliente com `POLLIN`.
+Quand un nouveau client arrive :
 
-O servidor não envia perguntas personalizadas ao conectar. Ele espera comandos IRC.
+1. `poll()` signale `POLLIN` sur le socket serveur ;
+2. le serveur appelle `accept()` ;
+3. le nouveau socket est mis en non bloquant ;
+4. un objet `Client` est créé dans la base de données ;
+5. le client est ajouté dans le vecteur de `pollfd`.
 
-## 7. Estrutura de um `Client`
+Le serveur n'envoie pas de message spécial au moment de la connexion. Il attend
+les commandes IRC du client.
 
-Cada cliente armazena:
+## 7. Données d'un client
 
-- nickname;
-- username;
-- realname;
-- estado de `PASS`;
-- estado de `NICK`;
-- estado de `USER`;
-- indicação de registro concluído;
-- indicação de fechamento pendente;
-- buffer de entrada;
-- fila de saída;
-- conjunto de canais;
-- limite e estado de estouro da fila de saída.
+Chaque client garde :
 
-Estados principais do registro:
+- son nickname ;
+- son username ;
+- son realname ;
+- l'état de `PASS` ;
+- l'état de `NICK` ;
+- l'état de `USER` ;
+- son état d'enregistrement ;
+- son buffer d'entrée ;
+- sa file de sortie ;
+- la liste des canaux rejoints.
 
-```mermaid
-stateDiagram-v2
-    [*] --> Conectado
-    Conectado --> PassRecebido: PASS correto
-    Conectado --> NickRecebido: NICK válido
-    Conectado --> UserRecebido: USER válido
-    PassRecebido --> Registrado: NICK e USER já recebidos
-    NickRecebido --> Registrado: PASS e USER já recebidos
-    UserRecebido --> Registrado: PASS e NICK já recebidos
-    Registrado --> Encerrando: QUIT
-    Encerrando --> [*]: fila de saída vazia
-```
-
-Os comandos de registro podem chegar em ordens diferentes. `try_registration()` verifica se os três requisitos já foram satisfeitos.
-
-## 8. Leitura com `POLLIN`
-
-Quando um cliente possui `POLLIN`, o loop chama `handle_client_data()`.
-
-A função:
-
-1. executa um único `recv()`;
-2. diferencia dados, EOF e erro;
-3. adiciona exatamente a quantidade recebida ao buffer do cliente;
-4. impede que uma entrada incompleta cresça além do limite configurado;
-5. extrai todas as linhas completas terminadas em `\n`;
-6. remove o `\r` final, quando presente;
-7. preserva o fragmento incompleto para o próximo `recv()`;
-8. envia cada linha completa ao parser IRC.
-
-### Exemplo de comando fragmentado
-
-Primeiro pacote:
+Un client devient enregistré seulement quand il a envoyé :
 
 ```text
-PRIV
+PASS <mot_de_passe_correct>
+NICK <nickname>
+USER <username> 0 * :<realname>
 ```
 
-Segundo pacote:
+L'ordre peut changer. La fonction `try_registration()` vérifie si les trois
+conditions sont remplies.
+
+## 8. Lecture des commandes
+
+Quand un client a `POLLIN`, le serveur appelle `recv()` une seule fois.
+
+Les données reçues sont ajoutées au buffer d'entrée du client.
+
+Ensuite, le serveur cherche des lignes complètes terminées par `\n`.
+
+Exemple avec une commande coupée en deux paquets :
 
 ```text
-MSG #geral :Olá\r\n
+Paquet 1: PRIV
+Paquet 2: MSG #general :salut\r\n
 ```
 
-Buffer reconstruído:
+Le buffer reconstruit :
 
 ```text
-PRIVMSG #geral :Olá\r\n
+PRIVMSG #general :salut\r\n
 ```
 
-### Exemplo de vários comandos em um pacote
+La ligne complète est envoyée au parseur IRC. Le morceau incomplet reste dans le
+buffer jusqu'au prochain `recv()`.
 
-Entrada recebida:
+## 9. Parseur IRC
+
+Le parseur lit une ligne IRC et sépare :
+
+- le préfixe optionnel ;
+- la commande ;
+- les paramètres ;
+- le dernier paramètre après `:`.
+
+Exemple :
 
 ```text
-PASS secret\r\nNICK alice\r\nUSER alice 0 * :Alice\r\n
+PRIVMSG #general :bonjour tout le monde
 ```
 
-Linhas processadas, em ordem:
+Résultat :
 
 ```text
-PASS secret
-NICK alice
-USER alice 0 * :Alice
+commande = PRIVMSG
+paramètre 1 = #general
+paramètre 2 = bonjour tout le monde
 ```
 
-## 9. Parser IRC
+Les commandes sont converties en majuscules. Donc `nick`, `Nick` et `NICK` sont
+traités comme la même commande.
 
-A classe `IRCCommand` recebe uma linha e separa:
+## 10. Écriture des réponses
+
+Les fonctions de commandes n'appellent pas `send()` directement.
+
+Elles ajoutent les réponses dans la file de sortie du client.
+
+Quand cette file n'est pas vide, le client reçoit l'événement `POLLOUT`.
+
+Quand `poll()` signale `POLLOUT`, le serveur appelle `send()`.
+
+Si seulement une partie du message est envoyée, le reste reste dans la file pour
+plus tard.
+
+La file est limitée. Si un client ne lit jamais ses messages et que la file
+devient trop grande, le client est déconnecté.
+
+## 11. Commandes de base
+
+Le serveur gère les commandes principales :
+
+- `PASS` : vérifie le mot de passe ;
+- `NICK` : définit ou change le nickname ;
+- `USER` : définit les informations utilisateur ;
+- `PING` : répond avec `PONG` ;
+- `QUIT` : ferme la connexion proprement ;
+- `JOIN` : rejoint un canal ;
+- `PART` : quitte un canal ;
+- `PRIVMSG` : envoie un message à un utilisateur ou à un canal.
+
+Il gère aussi des commandes utiles pour les clients IRC :
+
+- `CAP` ;
+- `NAMES` ;
+- `WHO` ;
+- `NOTICE`.
+
+## 12. Canaux
+
+Un canal est créé automatiquement au premier `JOIN`.
+
+Le premier client du canal devient opérateur.
+
+Un canal garde :
+
+- son nom ;
+- ses membres ;
+- ses opérateurs ;
+- les utilisateurs invités ;
+- son topic ;
+- ses modes.
+
+Quand un canal n'a plus de membres, il est supprimé.
+
+## 13. Messages dans un canal
+
+Quand un client envoie :
 
 ```text
-[:prefixo] COMANDO parametro parametro :parâmetro final com espaços
+PRIVMSG #general :salut
 ```
 
-Exemplo:
+Le serveur :
 
-```text
-:alice!alice@localhost PRIVMSG #geral :Olá a todos
-```
+1. vérifie que le canal existe ;
+2. vérifie que l'expéditeur est membre du canal ;
+3. envoie le message aux autres membres du canal ;
+4. n'envoie pas le message à l'expéditeur.
 
-Resultado:
+## 14. Opérateurs et modes obligatoires
 
-```text
-prefixo    = alice!alice@localhost
-comando    = PRIVMSG
-parâmetro0 = #geral
-parâmetro1 = Olá a todos
-```
+Les commandes obligatoires sont présentes :
 
-O comando é convertido para letras maiúsculas. Assim, `nick`, `Nick` e `NICK` são interpretados como `NICK`.
+- `KICK` : retirer un utilisateur du canal ;
+- `INVITE` : inviter un utilisateur ;
+- `TOPIC` : lire ou modifier le sujet du canal ;
+- `MODE` : modifier les modes du canal.
 
-## 10. Registro IRC
+Modes gérés :
 
-Um registro comum é:
-
-```text
-PASS secret
-NICK alice
-USER alice 0 * :Alice Doe
-```
-
-### `PASS`
-
-- compara o parâmetro com a senha do `Server`;
-- marca a senha como aceita;
-- retorna `464` se estiver incorreta;
-- retorna `462` se o cliente já estiver registrado.
-
-### `NICK`
-
-- valida tamanho e caracteres;
-- verifica duplicidade sem diferenciar maiúsculas/minúsculas;
-- armazena o nickname inicial;
-- depois do registro, altera o nickname e notifica os canais.
-
-### `USER`
-
-- exige os quatro parâmetros esperados;
-- armazena username e realname;
-- não permite novo `USER` depois do registro.
-
-### Conclusão
-
-Quando `PASS`, `NICK` e `USER` estão válidos:
-
-1. o cliente sai do armazenamento pendente;
-2. entra no mapa de clientes registrados;
-3. recebe o numeric `001`;
-4. passa a poder executar comandos que exigem registro.
-
-## 11. Roteamento de comandos
-
-Depois do parser, `process_complete_line()` escolhe o handler apropriado.
-
-```mermaid
-flowchart TD
-    A[Linha IRC válida] --> B{Comando}
-    B -->|PASS/NICK/USER| C[Registro]
-    B -->|PING/PONG| D[Manutenção da conexão]
-    B -->|QUIT| E[Encerramento]
-    B -->|JOIN/PART| F[Associação a canais]
-    B -->|PRIVMSG| G[Mensagens]
-    B -->|KICK/INVITE| H[Operação do canal]
-    B -->|TOPIC/MODE| I[Configuração do canal]
-    B -->|Desconhecido| J[Numeric 421]
-```
-
-Antes do registro, comandos que precisam de autenticação recebem `451`.
-
-## 12. Fluxo de `JOIN`
-
-Exemplo:
-
-```text
-JOIN #geral senhaCanal
-```
-
-Validações:
-
-1. nome do canal válido;
-2. usuário ainda não está no canal;
-3. convite existe quando o canal possui `+i`;
-4. chave está correta quando o canal possui `+k`;
-5. limite ainda não foi atingido quando existe `+l`.
-
-Se o canal não existir:
-
-1. ele é criado;
-2. o cliente é adicionado;
-3. o primeiro membro torna-se operador.
-
-Depois da entrada:
-
-1. o evento `JOIN` é transmitido;
-2. `331` ou `332` informa o tópico;
-3. `353` informa os membros;
-4. `366` encerra a lista de nomes.
-
-O cliente pode pertencer a vários canais simultaneamente.
-
-## 13. Fluxo de `PRIVMSG`
-
-### Mensagem para usuário
-
-```text
-PRIVMSG bob :Olá Bob
-```
-
-Fluxo:
-
-1. procura Bob no banco de clientes;
-2. monta o prefixo de Alice;
-3. coloca a mensagem na fila de saída de Bob;
-4. ativa `POLLOUT` para Bob no próximo ciclo.
-
-### Mensagem para canal
-
-```text
-PRIVMSG #geral :Olá canal
-```
-
-Fluxo:
-
-1. localiza o canal;
-2. confirma que o remetente é membro;
-3. percorre os outros membros;
-4. adiciona a mensagem à fila de cada destinatário;
-5. não devolve a mensagem ao remetente.
-
-## 14. Estrutura de um `Channel`
-
-Cada canal contém:
-
-```text
-Channel
-├── nome
-├── tópico
-├── membros
-├── operadores
-├── convidados
-├── modo i: somente convidados
-├── modo t: tópico restrito
-├── modo k: chave
-└── modo l: limite de usuários
-```
-
-O primeiro membro recebe privilégio de operador.
-
-Quando o último membro sai, o `Server` remove o canal.
-
-## 15. Comandos de operador
-
-### `INVITE`
-
-```text
-INVITE bob #geral
-```
-
-- exige que o autor pertença ao canal;
-- exige privilégio de operador;
-- rejeita usuário inexistente ou já presente;
-- adiciona Bob aos convidados;
-- envia `341` ao operador;
-- envia o evento `INVITE` a Bob.
-
-### `KICK`
-
-```text
-KICK #geral bob :Motivo
-```
-
-- exige privilégio de operador;
-- confirma que Bob pertence ao canal;
-- transmite o evento a todos;
-- remove Bob do canal;
-- apaga o canal se ele ficar vazio.
-
-### `TOPIC`
-
-Consulta:
-
-```text
-TOPIC #geral
-```
-
-Alteração:
-
-```text
-TOPIC #geral :Novo tópico
-```
-
-Com `+t`, somente operadores podem alterar o tópico.
-
-### `MODE`
-
-Consulta:
-
-```text
-MODE #geral
-```
-
-Alterações:
-
-```text
-MODE #geral +i
-MODE #geral +t
-MODE #geral +k senha
-MODE #geral +o bob
-MODE #geral +l 10
-```
-
-O parser de modos percorre cada caractere e consome os parâmetros necessários na mesma ordem.
-
-## 16. Escrita com `POLLOUT`
-
-Nenhum handler chama `send()` diretamente.
-
-Em vez disso:
-
-1. o handler chama `queue_message()`;
-2. a mensagem é adicionada à fila do cliente;
-3. o loop adiciona `POLLOUT` aos eventos monitorados;
-4. `poll()` informa quando o socket aceita escrita;
-5. `flush_client_output()` chama `send()` uma vez;
-6. somente os bytes efetivamente enviados são removidos;
-7. o restante permanece na fila;
-8. quando a fila fica vazia, `POLLOUT` é desativado.
-
-```mermaid
-sequenceDiagram
-    participant H as Handler IRC
-    participant C as Client
-    participant P as poll
-    participant S as Socket
-    H->>C: queue_output(mensagem)
-    C->>P: habilitar POLLOUT
-    P-->>C: socket pronto
-    C->>S: send(bytes pendentes)
-    S-->>C: quantidade enviada
-    C->>C: remover somente bytes enviados
-    C->>P: remover POLLOUT se fila vazia
-```
-
-A fila é limitada a 1 MiB. Um cliente que não consome dados e ultrapassa esse limite é desconectado para não comprometer o servidor.
-
-## 17. Fluxo de `QUIT`
-
-Exemplo:
-
-```text
-QUIT :Até logo
-```
-
-Fluxo:
-
-1. monta o evento `QUIT`;
-2. encontra todos os membros que compartilham canais;
-3. deduplica os destinatários;
-4. enfileira o evento para eles;
-5. remove o cliente de todos os canais;
-6. enfileira uma linha `ERROR` para o próprio cliente;
-7. marca o cliente como encerrando;
-8. espera a fila ficar vazia por `POLLOUT`;
-9. fecha o socket;
-10. remove o cliente do banco e libera o nickname.
-
-## 18. Desconexão inesperada
-
-Uma desconexão também pode acontecer por:
-
-- `recv()` retornando zero;
-- falha de leitura ou escrita;
-- `POLLHUP`;
-- `POLLERR`;
-- `POLLNVAL`;
-- estouro da fila de saída.
-
-Nesses casos, o servidor:
-
-1. notifica os membros afetados com `QUIT` quando possível;
-2. remove o cliente de todos os canais;
-3. apaga canais vazios;
-4. remove o cliente do banco;
-5. fecha o descritor;
-6. remove o `pollfd` do vetor.
-
-## 19. Exemplo completo com dois clientes
-
-```mermaid
-sequenceDiagram
-    participant A as Alice
-    participant S as ircserv
-    participant B as Bob
-    A->>S: PASS secret
-    A->>S: NICK alice
-    A->>S: USER alice 0 * :Alice
-    S-->>A: 001 Welcome
-    B->>S: PASS secret
-    B->>S: NICK bob
-    B->>S: USER bob 0 * :Bob
-    S-->>B: 001 Welcome
-    A->>S: JOIN #geral
-    S-->>A: JOIN + 331 + 353 + 366
-    B->>S: JOIN #geral
-    S-->>A: Bob JOIN
-    S-->>B: JOIN + 331 + 353 + 366
-    A->>S: PRIVMSG #geral :Olá
-    S-->>B: Alice PRIVMSG #geral :Olá
-    A->>S: MODE #geral +o bob
-    S-->>A: MODE #geral +o bob
-    S-->>B: MODE #geral +o bob
-    B->>S: TOPIC #geral :Novo tópico
-    S-->>A: Bob TOPIC
-    S-->>B: Bob TOPIC
-    A->>S: QUIT :Até logo
-    S-->>B: Alice QUIT
-```
-
-## 20. Arquivos principais
-
-| Arquivo | Responsabilidade |
+| Mode | Effet |
 |---|---|
-| `main.cpp` | Argumentos, sinais e ciclo de vida |
-| `create_listening_socket.cpp` | Criação, configuração, `bind` e `listen` |
-| `boucle_principale.cpp` | `poll`, `accept`, `POLLOUT` e desconexões |
-| `handle_client_data/handle_client_data.cpp` | `recv`, linhas, registro e comandos IRC |
-| `classes/IRCCommand.*` | Parser de uma linha IRC |
-| `classes/Client.*` | Estado, buffers, identidade e canais do cliente |
-| `classes/DataBase.*` | Clientes pendentes e registrados |
-| `classes/channel.*` | Membros, operadores, tópico e modos |
-| `classes/server.hpp` | Senha, banco de clientes e mapa de canais |
+| `+i` / `-i` | canal sur invitation seulement |
+| `+t` / `-t` | seul un opérateur peut changer le topic |
+| `+k` / `-k` | ajouter ou retirer une clé de canal |
+| `+o` / `-o` | donner ou retirer le statut opérateur |
+| `+l` / `-l` | ajouter ou retirer une limite d'utilisateurs |
 
-## 21. Resumo para apresentação
+Un utilisateur normal ne peut pas exécuter les actions réservées aux
+opérateurs.
 
-Uma explicação curta durante a avaliação pode ser:
+## 15. Déconnexion
 
-> O `main` valida porta e senha e cria um socket TCP não bloqueante. O loop usa um único `poll` para aceitar clientes, ler somente com `POLLIN` e escrever somente com `POLLOUT`. Cada cliente possui buffers de entrada e saída. A entrada é acumulada até formar linhas IRC completas, que são interpretadas por `IRCCommand` e encaminhadas ao handler correspondente. Os handlers alteram o estado do servidor e apenas enfileiram respostas. O loop envia essas filas sem bloquear e preserva envios parciais. Clientes podem participar de vários canais, que armazenam membros, operadores, tópico, convites, chave e limite. Ao desconectar, todas as associações são removidas e canais vazios são apagados.
+Un client peut partir avec `QUIT`, ou disparaître brutalement.
+
+Dans les deux cas, le serveur :
+
+1. retire le client de la base de données ;
+2. le retire de tous les canaux ;
+3. prévient les membres concernés si le client était enregistré ;
+4. supprime les canaux devenus vides ;
+5. ferme le descripteur du socket.
+
+## 16. Résumé pour la défense
+
+Phrase simple à retenir :
+
+```text
+Le serveur utilise un seul poll pour surveiller le socket serveur et tous les
+clients. accept, recv et send sont appelés seulement après les événements de
+poll. Chaque client a un buffer d'entrée pour les commandes partielles et une
+file de sortie pour éviter de bloquer sur l'écriture.
+```

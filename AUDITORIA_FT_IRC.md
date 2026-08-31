@@ -1,212 +1,250 @@
-# Auditoria final do projeto `ft_irc`
+# Audit du projet `ft_irc`
 
-## Resultado
+Ce document sert de checklist avant une évaluation. Il ne remplace pas les tests
+pendant la soutenance, mais il aide à voir rapidement si la partie obligatoire
+est prête.
 
-**Estado atual: a parte obrigatória está implementada e o projeto está em condição de candidato à entrega.**
+## 1. Résultat général
 
-A implementação foi comparada com `en.subject.pdf` versão 11.0, compilada em C++98 e testada com clientes TCP, HexChat, AddressSanitizer e UndefinedBehaviorSanitizer.
+La partie obligatoire semble cohérente avec le sujet `ft_irc`.
 
-Antes da entrega, o autor ainda deve colocar o projeto no repositório Git correto da 42 e enviar a branch de entrega.
+Le projet :
 
-## Requisitos gerais
+- compile en C++98 ;
+- produit l'exécutable `ircserv` ;
+- utilise un seul `poll()` ;
+- utilise des sockets non bloquants ;
+- gère plusieurs clients ;
+- gère les commandes IRC obligatoires ;
+- ne montre pas de fuite mémoire dans le test Valgrind exécuté.
 
-| Requisito | Estado | Evidência |
-|---|---|---|
-| Executável chamado `ircserv` | Concluído | `NAME := ircserv` no Makefile |
-| Execução com porta e senha | Concluído | `./ircserv <port> <password>` |
-| C++98 | Concluído | `-std=c++98 -pedantic` |
-| Warnings como erros | Concluído | `-Wall -Wextra -Werror` |
-| Regras `all`, `clean`, `fclean`, `re` | Concluído | Makefile |
-| Sem relink desnecessário | Concluído | segundo `make` não executa comandos |
-| Dependências de cabeçalhos | Concluído | arquivos `.d` com `-MMD -MP` |
-| Sem bibliotecas externas | Concluído | somente biblioteca padrão e API de sockets |
+Les bonus ne sont pas pris en compte ici.
 
-## Inicialização e rede
+## 2. Compilation
 
-| Requisito | Estado |
+| Point vérifié | État |
 |---|---|
-| Validação da quantidade de argumentos | Concluído |
-| Porta numérica entre 1 e 65535 | Concluído |
-| Senha não vazia | Concluído |
-| TCP/IPv4 | Concluído |
-| `SO_REUSEADDR` | Concluído |
-| Testes de falha de `socket`, `setsockopt`, `bind`, `fcntl` e `listen` | Concluído |
-| Socket de escuta não bloqueante | Concluído |
-| Sockets dos clientes não bloqueantes | Concluído |
-| Encerramento por `SIGINT` e `SIGTERM` | Concluído |
-| Proteção contra `SIGPIPE` | Concluído |
+| `Makefile` présent | OK |
+| règle `all` | OK |
+| règle `clean` | OK |
+| règle `fclean` | OK |
+| règle `re` | OK |
+| exécutable nommé `ircserv` | OK |
+| compilation avec `-Wall -Wextra -Werror` | OK |
+| compilation en C++98 | OK |
 
-## Uso de `poll()`
+Commande testée :
 
-- existe um único loop central baseado em `poll()`;
-- o socket de escuta é aceito somente após `POLLIN`;
-- `recv()` aparece em um único ponto e é chamado após `POLLIN`;
-- `send()` aparece em um único ponto e é chamado após `POLLOUT`;
-- `POLLERR`, `POLLNVAL` e `POLLHUP` são tratados;
-- quando `POLLIN` e `POLLHUP` chegam juntos, os dados são lidos primeiro;
-- respostas pendentes podem ser enviadas antes do fechamento;
-- a implementação não repete operações com base em `errno == EAGAIN`.
-
-## Entrada TCP
-
-- cada cliente possui buffer próprio;
-- fragmentos são preservados entre chamadas de `recv()`;
-- todas as linhas completas de um pacote são processadas em ordem;
-- `\r\n` e `\n` são aceitos;
-- o tamanho acumulado possui limite de segurança;
-- o parser separa prefixo, comando, parâmetros e parâmetro final iniciado por `:`;
-- comandos são reconhecidos sem diferenciar maiúsculas/minúsculas.
-
-Teste fragmentado executado:
-
-```text
-PA + SS secret
-NI + CK fragment
-PING split + -token
+```bash
+make -B
 ```
 
-Resultado: registro concluído e `PONG` correto, sem erro dos sanitizers.
+Résultat : compilation réussie.
 
-## Saída TCP
+## 3. Points éliminatoires du sujet
 
-- handlers apenas enfileiram respostas;
-- `POLLOUT` é habilitado somente enquanto há dados;
-- somente a quantidade efetivamente enviada é removida da fila;
-- o sufixo de um envio parcial permanece para o próximo evento;
-- a fila é limitada a 1 MiB por cliente;
-- clientes lentos que excedem o limite são desconectados.
+### `poll()`
 
-## Registro IRC
+Il y a un seul appel réel à `poll()` dans le code :
 
-| Comando/recurso | Estado |
+```cpp
+poll(&fds[0], fds.size(), -1)
+```
+
+Il se trouve dans la boucle principale.
+
+### `accept()`, `recv()` et `send()`
+
+Le flux est correct :
+
+- `accept()` est appelé après `POLLIN` sur le socket serveur ;
+- `recv()` est appelé après `POLLIN` sur un client ;
+- `send()` est appelé après `POLLOUT` sur un client.
+
+Le code ne relance pas une opération selon `errno == EAGAIN`.
+
+### `fcntl()`
+
+Les appels à `fcntl()` utilisent la forme autorisée :
+
+```cpp
+fcntl(fd, F_SETFL, O_NONBLOCK);
+```
+
+Cela est fait pour :
+
+- le socket d'écoute ;
+- chaque nouveau socket client.
+
+## 4. Démarrage du serveur
+
+Le serveur attend :
+
+```bash
+./ircserv <port> <password>
+```
+
+Il vérifie :
+
+- le nombre d'arguments ;
+- la validité du port ;
+- le mot de passe non vide.
+
+Le serveur écoute avec `INADDR_ANY`, donc sur toutes les interfaces réseau de la
+machine.
+
+## 5. Connexion avec `nc`
+
+Test de base :
+
+```bash
+nc 127.0.0.1 6667
+```
+
+Commandes envoyées :
+
+```text
+PASS secret
+NICK alice
+USER alice 0 * :Alice
+```
+
+Résultat attendu :
+
+```text
+:ircserv 001 alice :Welcome ...
+```
+
+Ce test a fonctionné avec des clients TCP automatisés.
+
+## 6. Plusieurs clients
+
+Le serveur accepte plusieurs clients en même temps.
+
+Tests effectués :
+
+- deux clients enregistrés en même temps ;
+- un client envoie un message pendant qu'un autre reste connecté ;
+- un client rejoint un canal ;
+- un autre client rejoint le même canal ;
+- les messages envoyés au canal sont reçus par les autres membres.
+
+Résultat : OK.
+
+## 7. Commandes partielles
+
+Le serveur garde les morceaux incomplets dans le buffer du client.
+
+Exemple testé :
+
+```text
+PASS pa
+ss
+```
+
+Le serveur reconstruit la commande complète avant de la traiter.
+
+Pendant qu'un client garde une commande incomplète, les autres clients
+continuent à fonctionner.
+
+Résultat : OK.
+
+## 8. Déconnexions inattendues
+
+Tests effectués :
+
+- fermeture d'un client enregistré ;
+- fermeture d'un client avec une commande incomplète ;
+- connexion d'un nouveau client après cette fermeture ;
+- `PING` envoyé par un client restant.
+
+Résultat : le serveur reste opérationnel.
+
+## 9. Mémoire
+
+Test Valgrind exécuté sur un scénario avec deux clients :
+
+- enregistrement ;
+- `JOIN` ;
+- `PRIVMSG` ;
+- `QUIT` ;
+- arrêt du serveur avec `SIGINT`.
+
+Résultat Valgrind :
+
+```text
+All heap blocks were freed -- no leaks are possible
+ERROR SUMMARY: 0 errors
+```
+
+## 10. Commandes IRC testées
+
+| Commande | État |
 |---|---|
-| `PASS` com senha global | Concluído |
-| `NICK` inicial | Concluído |
-| Nickname único | Concluído |
-| Alteração de `NICK` | Concluído |
-| `USER` e realname | Concluído |
-| Ordem flexível de `PASS`, `NICK`, `USER` | Concluído |
-| Numeric `001` | Concluído |
-| Rejeição de comandos antes do registro | Concluído |
-| Erros de senha, nickname e parâmetros | Concluído |
+| `PASS` | OK |
+| `NICK` | OK |
+| `USER` | OK |
+| `PING` / `PONG` | OK |
+| `QUIT` | OK |
+| `JOIN` | OK |
+| `PART` | présent dans le code |
+| `PRIVMSG` utilisateur | OK |
+| `PRIVMSG` canal | OK |
+| `CAP` | présent pour compatibilité client |
+| `NAMES` | présent |
+| `WHO` | présent |
+| `NOTICE` | présent |
 
-## Comandos de conexão e compatibilidade
+## 11. Opérateurs
 
-| Comando | Estado |
+Commandes obligatoires :
+
+| Fonction | État |
 |---|---|
-| `PING` / `PONG` | Concluído |
-| `QUIT` com motivo | Concluído |
-| `CAP LS`, `CAP LIST`, `CAP REQ`, `CAP END` | Concluído |
-| `NAMES` | Concluído |
-| `WHO` | Concluído |
-| `NOTICE` | Concluído |
-| Comandos desconhecidos | Numeric `421` |
+| `KICK` | OK |
+| `INVITE` | OK |
+| `TOPIC` | OK |
+| `MODE +i` / `-i` | OK |
+| `MODE +t` / `-t` | OK |
+| `MODE +k` / `-k` | OK |
+| `MODE +o` / `-o` | OK |
+| `MODE +l` / `-l` | OK |
 
-HexChat foi usado como cliente de referência e conseguiu conectar dois usuários, entrar em canais, trocar mensagens e consultar modos.
+Un utilisateur normal reçoit une erreur quand il essaie une action réservée aux
+opérateurs.
 
-## Canais e mensagens
+Attention : un utilisateur normal peut changer le topic si le mode `+t` n'est
+pas actif. Quand `+t` est actif, seul un opérateur peut le faire.
 
-| Recurso | Estado |
-|---|---|
-| Cliente em vários canais | Concluído |
-| Criação automática no primeiro `JOIN` | Concluído |
-| Primeiro membro torna-se operador | Concluído |
-| `JOIN` simples e múltiplo | Concluído |
-| `JOIN 0` | Concluído |
-| `PART` simples e múltiplo | Concluído |
-| Mensagem privada usuário→usuário | Concluído |
-| `PRIVMSG` para canal | Concluído |
-| Remetente excluído do broadcast de `PRIVMSG` | Concluído |
-| Eventos `JOIN`, `PART`, `QUIT` e `NICK` | Concluído |
-| Remoção de canais vazios | Concluído |
+## 12. Points à refaire pendant la défense
 
-## Operadores e modos obrigatórios
+Avant de valider le projet, refaire manuellement :
 
-| Recurso | Estado |
-|---|---|
-| `KICK` | Concluído |
-| `INVITE` | Concluído |
-| Consulta e alteração de `TOPIC` | Concluído |
-| Consulta de `MODE` | Concluído |
-| `+i` / `-i` | Concluído |
-| `+t` / `-t` | Concluído |
-| `+k` / `-k` | Concluído |
-| `+o` / `-o` | Concluído |
-| `+l` / `-l` | Concluído |
-| Combinações como `+it` e `+kl` | Concluído |
-| Verificação de operador | Concluído |
-| Chave, convite e limite aplicados no `JOIN` | Concluído |
+1. cloner le dépôt dans un dossier vide ;
+2. vérifier que le dépôt est le bon ;
+3. lancer `make`;
+4. lancer `./ircserv 6667 secret`;
+5. connecter deux clients avec `nc`;
+6. tester `PASS`, `NICK`, `USER`;
+7. tester `JOIN #test`;
+8. tester `PRIVMSG #test :hello`;
+9. tester une commande coupée en plusieurs morceaux ;
+10. tuer un client brutalement ;
+11. vérifier Valgrind ;
+12. tester `KICK`, `INVITE`, `TOPIC` et `MODE`.
 
-## Desconexões
+## 13. Limitations
 
-- `QUIT` notifica os membros afetados;
-- respostas pendentes são esvaziadas antes do fechamento controlado;
-- EOF, falha de leitura/escrita e eventos de erro removem o cliente;
-- o cliente é removido de todos os canais;
-- canais vazios são apagados;
-- nicknames são liberados para reutilização;
-- destinatários compartilhados por vários canais são deduplicados.
+Les points suivants doivent encore être confirmés pendant une vraie évaluation :
 
-## Documentação
+- test avec le client IRC de référence choisi par l'équipe ;
+- test `Ctrl+Z` sur un client puis flood d'un canal ;
+- vérification dans un clone propre du dépôt officiel ;
+- vérification Norminette si elle est demandée par l'évaluation locale.
 
-| Documento | Estado |
-|---|---|
-| README em inglês | Concluído |
-| Primeira linha obrigatória | Preenchida com o login confirmado `dleite-b` |
-| `Description` | Concluído |
-| `Instructions` | Concluído |
-| `Resources` | Concluído |
-| Explicação do uso de IA | Concluído |
-| Manual de uso | `MANUAL_DE_USO.md` |
-| Fluxo do programa | `FLUXO_DO_PROGRAMA.md` |
+## 14. Conclusion
 
-## Organização Git
+Pour la partie obligatoire, le projet semble prêt.
 
-- o repositório Git local criado durante o desenvolvimento não pertence à escola e foi removido;
-- `.gitignore` permanece no projeto para ignorar objetos, dependências, binários, logs e o PDF;
-- ainda é necessário usar o repositório oficial da 42 para a entrega.
-
-Ainda é necessário:
-
-1. copiar ou adicionar o projeto ao repositório oficial da 42;
-2. revisar `git status`;
-3. criar o commit de entrega;
-4. enviar a branch para o remote oficial.
-
-## Testes executados nesta revisão
-
-- `make fclean && make`;
-- segundo `make` sem relink;
-- argumentos ausentes;
-- porta inválida;
-- senha vazia;
-- compilação com AddressSanitizer e UndefinedBehaviorSanitizer;
-- negociação `CAP`;
-- registro IRC;
-- `JOIN`, `NAMES` e `WHO`;
-- `NOTICE` e `PING`;
-- dois clientes simultâneos;
-- canal invite-only, chave, limite e proteção do tópico;
-- convite, promoção de operador e mensagens;
-- comandos enviados em vários fragmentos;
-- vários comandos no mesmo fluxo TCP;
-- fechamento imediato da entrada com respostas ainda pendentes.
-
-Nenhum erro de AddressSanitizer ou UndefinedBehaviorSanitizer foi observado.
-
-## Limitações e observações finais
-
-- Valgrind não está instalado no ambiente; os sanitizers foram usados como alternativa.
-- Casos de falha real por falta total de memória não foram reproduzidos.
-- Transferência de arquivos e bot são bônus e não foram implementados.
-- O remote e o push dependem das credenciais/repositório fornecidos pela 42.
-
-## Checklist antes da defesa
-
-- [x] Confirmar login(s) na primeira linha do README (`dleite-b`).
-- [ ] Configurar o remote oficial.
-- [ ] Configurar o remote e fazer push.
-- [ ] Clonar o repositório em outro diretório e recompilar.
-- [ ] Repetir o teste completo no HexChat.
-- [ ] Saber explicar `poll`, buffers, parser, filas e modos.
-- [ ] Treinar uma pequena modificação ao vivo.
+Estimation pour la section opérateur : `5/5`, si les mêmes tests passent pendant
+la soutenance.
