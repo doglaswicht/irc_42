@@ -1,7 +1,7 @@
 NAME := ircserv
 
 CXX := c++
-CXXFLAGS := -Wall -Wextra -Werror -std=c++98 -pedantic
+CXXFLAGS := -Wall -Wextra -Werror -std=c++98 -g -pedantic
 DEPFLAGS := -MMD -MP
 
 SOURCES := main.cpp \

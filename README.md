@@ -1,4 +1,4 @@
-*This project has been created as part of the 42 curriculum by dleite-b.*
+*This project has been created as part of the 42 curriculum by diahussa, dleite-b.*
 
 # ft_irc
 
